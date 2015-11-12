@@ -1,17 +1,26 @@
-from django.shortcuts import render_to_response
-from events.models import Event
+from django.shortcuts import render_to_response, get_object_or_404
+from events.models import Event, Attendance
 from django.template import RequestContext
 from events.forms import EventForm
 from dateutil.parser import parse
 from django.core.urlresolvers import reverse
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseRedirect, Http404
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 
 # Create your views here.
 def tonight(request):
 	events = Event.objects.today().filter(latest=True)
+	attending=[]
+	for event in events:
+		try:
+			Attendance.objects.get(event=event,user=request.user)
+			attending.append(True)
+		except Attendance.DoesNotExist:
+			attending.append(False)
+
 	context = {
-		'events': events,
+		'events': zip(events, attending),
 	}
 	return render_to_response(
 		'events/tonight.html',
@@ -44,3 +53,26 @@ def create(request):
 			{'form': form},
 			context_instance = RequestContext(request)
 		)
+
+create = login_required(create)
+
+def toggle_attendance(request):
+	try:
+		event_id = int(request.POST['event_id'])
+	except (KeyError , ValueError):
+		raise Http404
+	event=get_object_or_404(Event, id=event_id)
+	attendance, created = Attendance.objects.get_or_create(user=request.user, event=event)
+
+	if created:
+		messages.success(request, ('You are now attending "%(event)s"') % {'event': event})
+	else:
+		attendance.delete()
+		messages.success(request, ('You are no longer attending "%(event)s"') % {'event': event})
+
+	next = request.POST.get('next','')
+	if not next:
+		next = reverse('ev_tonight')
+	return HttpResponseRedirect(next)
+
+toggle_attendance = login_required(toggle_attendance)
